@@ -1,0 +1,158 @@
+name: ${COMPOSE_PROJECT_NAME:-grassroots-basketball}
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: docker/api/Dockerfile
+    working_dir: /var/www/html
+    entrypoint: ["/usr/local/bin/app-entrypoint"]
+    command: ["php", "artisan", "serve", "--host=0.0.0.0", "--port=8000"]
+    environment:
+      BROADCAST_CONNECTION: reverb
+      REVERB_APP_ID: ${REVERB_APP_ID:-grassroots-local}
+      REVERB_APP_KEY: ${REVERB_APP_KEY:-grassroots-local-key}
+      REVERB_APP_SECRET: ${REVERB_APP_SECRET:-grassroots-local-secret}
+      REVERB_HOST: reverb
+      REVERB_PORT: 8080
+      REVERB_SCHEME: http
+    volumes:
+      - ./apps/api:/var/www/html
+      - api_vendor:/var/www/html/vendor
+    ports:
+      - "${APP_PORT:-8010}:8000"
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      reverb:
+        condition: service_started
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "http://localhost:8000/api/v1/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 45s
+    restart: unless-stopped
+    networks:
+      - grassroots
+
+  web:
+    build:
+      context: .
+      dockerfile: docker/web/Dockerfile
+    working_dir: /app
+    command: ["npm", "run", "dev", "--", "--host", "0.0.0.0", "--port", "5173"]
+    environment:
+      VITE_API_PROXY_TARGET: http://api:8000
+      VITE_HMR_CLIENT_PORT: ${WEB_PORT:-5175}
+      VITE_REVERB_APP_KEY: ${REVERB_APP_KEY:-grassroots-local-key}
+      VITE_REVERB_HOST: localhost
+      VITE_REVERB_PORT: ${REVERB_FORWARD_PORT:-8080}
+      VITE_REVERB_SCHEME: http
+    volumes:
+      - ./apps/web:/app
+      - web_node_modules:/app/node_modules
+    ports:
+      - "${WEB_PORT:-5175}:5173"
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:5173').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 45s
+    restart: unless-stopped
+    networks:
+      - grassroots
+
+  mysql:
+    image: mysql:8.4
+    environment:
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-grassroots_basketball}
+      MYSQL_USER: ${MYSQL_USER:-grassroots}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-grassroots_local}
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-root_local}
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+    volumes:
+      - mysql_data:/var/lib/mysql
+    ports:
+      - "${MYSQL_FORWARD_PORT:-3308}:3306"
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h localhost -u root -p$${MYSQL_ROOT_PASSWORD} --silent"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 30s
+    restart: unless-stopped
+    networks:
+      - grassroots
+
+  redis:
+    image: redis:7.4-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    ports:
+      - "${REDIS_FORWARD_PORT:-6380}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    restart: unless-stopped
+    networks:
+      - grassroots
+
+  reverb:
+    build:
+      context: .
+      dockerfile: docker/api/Dockerfile
+    working_dir: /var/www/html
+    entrypoint: ["/usr/local/bin/app-entrypoint"]
+    command: ["php", "artisan", "reverb:start", "--host=0.0.0.0", "--port=8080"]
+    environment:
+      REVERB_APP_ID: ${REVERB_APP_ID:-grassroots-local}
+      REVERB_APP_KEY: ${REVERB_APP_KEY:-grassroots-local-key}
+      REVERB_APP_SECRET: ${REVERB_APP_SECRET:-grassroots-local-secret}
+      REVERB_HOST: reverb
+      REVERB_PORT: 8080
+      REVERB_SCHEME: http
+      REDIS_HOST: redis
+    volumes:
+      - ./apps/api:/var/www/html
+      - api_vendor:/var/www/html/vendor
+    ports:
+      - "${REVERB_FORWARD_PORT:-8080}:8080"
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - grassroots
+
+  mailpit:
+    image: axllent/mailpit:v1.29
+    ports:
+      - "${MAILPIT_SMTP_PORT:-1025}:1025"
+      - "${MAILPIT_UI_PORT:-8025}:8025"
+    restart: unless-stopped
+    networks:
+      - grassroots
+
+volumes:
+  api_vendor:
+  web_node_modules:
+  mysql_data:
+  redis_data:
+
+networks:
+  grassroots:
+    driver: bridge

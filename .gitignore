@@ -1,0 +1,16 @@
+/.env
+/.idea
+/.vscode
+/.fleet
+/.DS_Store
+
+apps/api/.env
+apps/api/vendor/
+apps/api/storage/*.key
+apps/api/storage/logs/*.log
+apps/api/bootstrap/cache/*.php
+
+apps/web/.env
+apps/web/.env.local
+apps/web/node_modules/
+apps/web/dist/
